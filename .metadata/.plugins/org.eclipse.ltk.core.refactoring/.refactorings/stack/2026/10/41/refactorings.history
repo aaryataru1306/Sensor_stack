@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">&#x0A;<refactoring comment="Rename resource &apos;stack/Core/Inc/Protocols/I2C/I2C_config.h&apos; to &apos;i2c_config.h&apos;" description="Rename resource &apos;I2C_config.h&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="Core/Inc/Protocols/I2C/I2C_config.h" name="i2c_config.h" stamp="1791122195839" updateReferences="true"/>&#x0A;<refactoring comment="Rename resource &apos;stack/Core/Inc/LIB/STM32F446xx.h&apos; to &apos;STM32F411xx.h&apos;" description="Rename resource &apos;STM32F446xx.h&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="Core/Inc/LIB/STM32F446xx.h" name="STM32F411xx.h" stamp="1791122636307" updateReferences="true"/>
+</session>
