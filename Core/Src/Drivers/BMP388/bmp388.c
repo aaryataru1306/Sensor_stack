@@ -67,6 +67,10 @@
  */
 static void BMP388_ReadRegs(uint8_t reg_addr, uint8_t *buffer, uint16_t length)
 {
+    if (buffer == 0 || length == 0 || length > BMP388_MAX_READ_LEN) {
+        return;
+    }
+    
     uint8_t temp[BMP388_MAX_READ_LEN + 1U];
 
     /* Request length + 1 bytes so the dummy byte lands in temp[0]. */
@@ -337,6 +341,12 @@ uint8_t BMP388_Init(BMP388_CalibData *calib)
 
     /* 3. Load factory calibration. Everything below this needs it. */
     BMP388_ReadCalibData(calib);
+    
+    /* 4. Configure oversampling and ODR */
+    BMP388_SetOSR(BMP388_DEFAULT_OSR_PRESS, BMP388_DEFAULT_OSR_TEMP);
+    BMP388_SetODR(BMP388_DEFAULT_ODR);
 
+    /* 5. Enable pressure & temperature measurement in Normal mode */
+    BMP388_SetPowerCtrl(BMP388_PWR_CTRL_PRESS_EN | BMP388_PWR_CTRL_TEMP_EN | BMP388_PWR_CTRL_MODE_NORMAL);
     return 1U;
 }
