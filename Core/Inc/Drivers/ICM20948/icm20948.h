@@ -61,6 +61,8 @@ typedef enum {
     ICM20948_ACCEL_FS_16G = 0x03
 } ICM20948_AccelFS_t;
 
+#include "icm20948_config.h"
+
 /**
  * @brief Driver status codes.
  */
