@@ -1,3 +1,4 @@
+successfully downloaded text file (SHA: be2a88b430a327158ec83e11064af7ea08795160)
 /**
  ******************************************************************************
  * @file    sensor_fusion.h
@@ -275,6 +276,13 @@ SF_Status_t SF_AltitudeFeedBaro(void *ctx, float pressure_pa, float dt_s);
  * @retval SF_OK on success.
  */
 SF_Status_t SF_AltitudeFeedGPS(void *ctx, float gps_altitude_m, bool valid);
+
+/**
+ * @brief Seed the altitude filter with a barometric ground reference.
+ *
+ * @param[in] pressure_pa  BMP388 ground reference pressure [Pa].
+ */
+void SF_AltitudeSetGroundRef(float pressure_pa);
 
 /**
  * @brief Read the fused altitude state.
