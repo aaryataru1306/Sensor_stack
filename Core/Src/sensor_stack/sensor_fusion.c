@@ -1,3 +1,4 @@
+successfully downloaded text file (SHA: cef6c537c2af80bbd56c53fbf4828e4fc10c057e)
 /**
  ******************************************************************************
  * @file    sensor_fusion.c
@@ -643,6 +644,7 @@ SF_Status_t SF_GetAttitude(void *ctx, SF_Attitude_t *out)
 
 typedef struct {
     float alt_m;
+    float ground_alt_m;
     float vel_m_s;
     float P[2][2];
     float Q[2][2];
@@ -769,16 +771,21 @@ SF_Status_t SF_AltitudeFeedGPS(void *ctx, float gps_altitude_m, bool valid)
     return SF_OK;
 }
 
+void SF_AltitudeSetGroundRef(float pressure_pa)
+{
+    g_alt.ground_alt_m = sf_pressure_to_altitude(pressure_pa);
+}
+
 SF_Status_t SF_GetAltitude(void *ctx, SF_Altitude_t *out)
 {
     (void)ctx;
     if (out == 0) {
         return SF_ERROR_INVALID_PARAM;
     }
-    out->altitude_m = g_alt.alt_m;
+    out->altitude_m = g_alt.alt_m - g_alt.ground_alt_m;
     out->vertical_velocity_m_s = g_alt.vel_m_s;
     out->pressure_pa = 0.0f;   /* populated by the caller's own BMP388 read */
-    out->baro_altitude_m = g_alt.alt_m - g_alt.baro_bias_m;
+    out->baro_altitude_m = g_alt.alt_m - g_alt.baro_bias_m - g_alt.ground_alt_m;
     out->gps_altitude_m = 0.0f;
     out->gps_altitude_valid = (g_alt.gps_updates > 0U);
     out->baro_updates = g_alt.baro_updates;
