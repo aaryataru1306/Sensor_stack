@@ -64,12 +64,11 @@ extern "C" {
  * them to — the actual chip-select pin is an argument to every
  * transaction call, so a caller is free to use any GPIOA pin.
  *
- * @warning The GPS driver (if enabled) uses USART2 on PA2/PA3. If you
- *          also run USART2, PA3 is not free for ICM20948_CS and you must
- *          move one of them.
+ * @note ICM20948 CS is configured on PA1 (avoiding collision with
+ *       USART2 on PA2/PA3).
  * @{
  */
-#define SPI1_CS_ICM20948_PIN   3U   /**< PA3 — ICM20948 chip-select, active low. */
+#define SPI1_CS_ICM20948_PIN   1U   /**< PA1 — ICM20948 chip-select, active low. */
 #define SPI1_CS_BMP388_PIN     4U   /**< PA4 — BMP388 chip-select, active low. */
 /** @} */
 
@@ -85,7 +84,7 @@ extern "C" {
  *     1. Enable the RCC clock for GPIOA and for SPI1.
  *     2. Configure PA5/PA6/PA7 as alternate-function push-pull, AF5,
  *        high speed.
- *     3. Configure PA3 and PA4 (the default CS pins) as plain
+ *     3. Configure PA1 and PA4 (the default CS pins) as plain
  *        push-pull outputs, and drive them **high** — both parts must
  *        see an idle-high CS before their first transaction.
  *     4. Program CR1: master, software NSS, BR = DIV16, SPI mode 0
