@@ -10,7 +10,7 @@
  *
  *   Bus topology assumed on the Black Pill:
  *     SPI1  PA5 (SCK) / PA6 (MISO) / PA7 (MOSI)   AF5
- *     CS    PA3 (ICM20948), PA4 (BMP388)          manual GPIO, active low
+ *     CS    PA1 (ICM20948), PA4 (BMP388)          manual GPIO, active low
  *
  *   SCK/MISO/MOSI are fixed by the STM32F411's alternate-function map —
  *   AF5 on GPIOA is the only pin set that exposes SPI1 without a remap.
@@ -175,7 +175,7 @@ typedef struct {
  *        very-high speed. These three pins are fixed by the silicon —
  *        AF5 on GPIOA is the only pin set that exposes SPI1 on this
  *        part without a remap.
- *     3. Configure PA3 and PA4 (the two default CS pins) as plain
+ *     3. Configure PA1 and PA4 (the two default CS pins) as plain
  *        push-pull outputs, and drive them **high**. This is the piece
  *        of the bring-up that matters most: both sensors' SPI state
  *        machines require CS to be deasserted (high) before their first
@@ -185,12 +185,9 @@ typedef struct {
  *
  *   Called exactly once, from SPI1_Init(). Idempotent.
  *
- * @warning Configures **both** PA3 and PA4 as CS pins regardless of
- *          which sensor drivers are actually built into the binary. If
- *          PA3 is used for something else (e.g. USART2_RX for the GPS
- *          module), that peripheral's own bring-up must run **after**
- *          this one, or this function will overwrite its GPIO config.
- *          The safest rule is: no other peripheral uses PA3 or PA4 on
+ * @warning Configures **both** PA1 and PA4 as CS pins regardless of
+ *          which sensor drivers are actually built into the binary.
+ *          The safest rule is: no other peripheral uses PA1 or PA4 on
  *          this project.
  */
 static void SPI1_GPIO_Init(void)
