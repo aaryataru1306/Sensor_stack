@@ -63,6 +63,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 
 /*============================================================================*
  *                          SYSTEM CLOCK CONFIGURATION                        *
@@ -203,6 +205,38 @@ static SF_Altitude_t     g_altitude;
 #define GPS_MIN_SATS_FOR_ALT   4U
 
 /*============================================================================*
+ *                          DEBUG UART CONFIGURATION                          *
+ *============================================================================*/
+
+static UART_Bare_Handle_t g_debug_uart;
+
+static void DebugUART_Init(void)
+{
+    /* Enable GPIOA (AHB1ENR bit 0) and USART1 (APB2ENR bit 4) */
+    #define RCC_AHB1ENR_REG (*(volatile uint32_t *)(RCC_BASE + 0x30UL))
+    #define RCC_APB2ENR_REG (*(volatile uint32_t *)(RCC_BASE + 0x44UL))
+    RCC_AHB1ENR_REG |= (1U << 0);
+    RCC_APB2ENR_REG |= (1U << 4);
+
+    /* Configure PA9 (TX) to Alternate Function 7 (USART1) */
+    #define GPIOA_BASE_REG  0x40020000UL
+    #define GPIOA_MODER_REG (*(volatile uint32_t *)(GPIOA_BASE_REG + 0x00UL))
+    #define GPIOA_AFRH_REG  (*(volatile uint32_t *)(GPIOA_BASE_REG + 0x24UL))
+    
+    GPIOA_MODER_REG &= ~(3U << (9 * 2));
+    GPIOA_MODER_REG |= (2U << (9 * 2));
+    GPIOA_AFRH_REG &= ~(0xFU << ((9 - 8) * 4));
+    GPIOA_AFRH_REG |= (7U << ((9 - 8) * 4));
+
+    UART_Bare_Config_t cfg = {
+        .peripheral_clock_hz = 100000000, /* PCLK2 is 100 MHz */
+        .baud_rate = 115200,
+        .timeout_iters = 1000000U
+    };
+    (void)UART_Bare_Init(&g_debug_uart, (volatile uint32_t *)0x40011000UL, &cfg);
+}
+
+/*============================================================================*
  *                                MAIN                                        *
  *============================================================================*/
 
@@ -210,6 +244,9 @@ int main(void)
 {
     /* ---- 1. Clock. ---- */
     SystemClock_Config();
+
+    /* ---- 1.5 Debug UART. ---- */
+    DebugUART_Init();
 
     /* ---- 2. SPI1 (shared by ICM20948 and BMP388). ---- */
     SPI1_Init();
@@ -301,6 +338,28 @@ int main(void)
         }
 
         (void)SF_GetAltitude(0, &g_altitude);
+
+        /* === C.5 Display Data over UART === */
+        char print_buf[512];
+        int len = snprintf(print_buf, sizeof(print_buf),
+            "\r\n--- Sensor Data ---\r\n"
+            "[Derived] Roll: %5.2f, Pitch: %5.2f, Yaw: %5.2f, Alt: %5.2f m\r\n"
+            "[ICM20948] Acc: (%5.2f, %5.2f, %5.2f)g | Gyr: (%6.1f, %6.1f, %6.1f)dps | T: %4.1fC\r\n"
+            "[MPU6050]  Acc: (%5.2f, %5.2f, %5.2f)g | Gyr: (%6.1f, %6.1f, %6.1f)dps | T: %4.1fC\r\n"
+            "[BMP388]   Pressure: %7.1f Pa | T: %4.1fC\r\n"
+            "[GPS]      Lat: %9.5f, Lon: %9.5f, Alt: %6.1f m, Spd: %5.1f kts, Sats: %d, Fix: %d\r\n",
+            g_attitude.roll_deg, g_attitude.pitch_deg, g_attitude.yaw_deg, g_altitude.altitude_m,
+            g_icm_data.accel_x, g_icm_data.accel_y, g_icm_data.accel_z,
+            g_icm_data.gyro_x, g_icm_data.gyro_y, g_icm_data.gyro_z, g_icm_data.temp_c,
+            g_mpu_data.AccelX, g_mpu_data.AccelY, g_mpu_data.AccelZ,
+            g_mpu_data.GyroX, g_mpu_data.GyroY, g_mpu_data.GyroZ, g_mpu_data.Temperature,
+            g_bmp_data.pressure, g_bmp_data.temperature,
+            g_gps_fix.latitude_deg, g_gps_fix.longitude_deg, g_gps_fix.altitude_m,
+            g_gps_fix.speed_knots, g_gps_fix.satellites_in_use, g_gps_fix.fix_quality
+        );
+        if (len > 0) {
+            (void)UART_Bare_Transmit(&g_debug_uart, (const uint8_t *)print_buf, (uint16_t)len);
+        }
 
         /* === D. Loop pacing ===
          *
