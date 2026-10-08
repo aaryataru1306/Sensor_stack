@@ -61,6 +61,14 @@ int GPS_BusWrite(void *bus_context, const uint8_t *data, uint16_t length);
  */
 void GPS_DelayMs(uint32_t ms);
 
+/**
+ * @brief One-time bare-metal USART2 + GPIOA pin bring-up for STM32F411.
+ *        Call before GPS_Init().
+ * @param peripheral_clock_hz APB1 peripheral clock (e.g. PCLK1_HZ = 50 MHz).
+ * @param baud_rate           Target baud rate (e.g. 9600, 38400, 115200).
+ */
+void gps_bus_stm32_setup(uint32_t peripheral_clock_hz, uint32_t baud_rate);
+
 #ifdef __cplusplus
 }
 #endif

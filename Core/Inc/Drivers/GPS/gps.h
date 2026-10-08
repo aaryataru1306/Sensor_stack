@@ -93,59 +93,72 @@ typedef enum {
     GPS_FIX_QUALITY_SIMULATION    = 8
 } GPS_FixQuality_t;
 
+/** @brief GSA fix mode (NMEA0183 field 2 of $--GSA). */
+typedef enum {
+    GPS_FIX_MODE_NONE = 1,  /**< 1 = Fix not available. */
+    GPS_FIX_MODE_2D   = 2,  /**< 2 = 2D fix. */
+    GPS_FIX_MODE_3D   = 3   /**< 3 = 3D fix. */
+} GPS_FixMode_t;
+
+/** @brief u-blox NEO-M8N Dynamic Platform Model (UBX-CFG-NAV5). */
+typedef enum {
+    GPS_DYNMODEL_PORTABLE    = 0,  /**< Portable (default) */
+    GPS_DYNMODEL_STATIONARY  = 2,  /**< Stationary (timing/surveillance) */
+    GPS_DYNMODEL_PEDESTRIAN  = 3,  /**< Pedestrian */
+    GPS_DYNMODEL_AUTOMOTIVE  = 4,  /**< Automotive / ground vehicle */
+    GPS_DYNMODEL_SEA         = 5,  /**< Sea / maritime */
+    GPS_DYNMODEL_AIRBORNE_1G = 6,  /**< Airborne <1g */
+    GPS_DYNMODEL_AIRBORNE_2G = 7,  /**< Airborne <2g */
+    GPS_DYNMODEL_AIRBORNE_4G = 8,  /**< Airborne <4g (high performance UAVs) */
+    GPS_DYNMODEL_WRIST       = 9   /**< Wrist worn */
+} GPS_DynamicModel_t;
+
+/** @brief u-blox NEO-M8N Reset types (UBX-CFG-RST). */
+typedef enum {
+    GPS_RESET_HOT_START  = 0x0000, /**< Hot start (uses all cached ephemeris & almanac) */
+    GPS_RESET_WARM_START = 0x0001, /**< Warm start (clears ephemeris only) */
+    GPS_RESET_COLD_START = 0xFFFF  /**< Cold start (clears all non-volatile storage) */
+} GPS_ResetType_t;
+
 /**
  * @brief One consolidated GPS/GNSS fix, assembled from whichever of
- *        $--GGA (position/altitude/fix-quality/satellite count/HDOP) and
- *        $--RMC (speed/course/date, plus a second independent position +
- *        validity check) sentences have been seen so far. Fields not yet
- *        supplied by either sentence keep their previous value rather
- *        than resetting to zero — a real receiver interleaves GGA/RMC/
- *        GSA/GSV every fix cycle, and this struct is meant to always
- *        reflect "the best currently-known picture," not "only what the
- *        single most recent sentence happened to contain."
+ *        $--GGA (position/altitude/fix-quality/satellite count/HDOP),
+ *        $--RMC (speed/course/date/validity), $--VTG (course/speed km/h),
+ *        $--GSA (2D/3D mode, PDOP/VDOP), and $--GLL sentences have been seen.
  */
 typedef struct {
     double  latitude_deg;    /**< + = North, - = South. 0.0 before any fix. */
     double  longitude_deg;   /**< + = East, - = West. 0.0 before any fix. */
     double  altitude_m;      /**< Mean-sea-level altitude, from GGA field 9. */
-    double  speed_knots;     /**< Ground speed, from RMC field 7. */
-    double  course_deg;      /**< True ground track, from RMC field 8. */
-    double  hdop;            /**< Horizontal dilution of precision, GGA field 8. */
+    double  speed_knots;     /**< Ground speed in knots, from RMC/VTG. */
+    double  speed_kmh;       /**< Ground speed in km/h, from VTG / converted from knots. */
+    double  speed_mps;       /**< Ground speed in m/s (speed_kmh / 3.6). */
+    double  course_deg;      /**< True ground track in degrees, from RMC/VTG. */
+    double  hdop;            /**< Horizontal dilution of precision, GGA/GSA. */
+    double  pdop;            /**< Position dilution of precision, GSA. */
+    double  vdop;            /**< Vertical dilution of precision, GSA. */
+    double  geoid_separation_m; /**< Geoid separation in meters, GGA field 11. */
 
     GPS_FixQuality_t fix_quality;   /**< GGA field 6. */
+    GPS_FixMode_t    fix_mode;      /**< GSA field 2: 1=None, 2=2D, 3=3D. */
     uint8_t satellites_in_use;      /**< GGA field 7. */
+    bool    has_fix;                /**< true when fix_quality > 0 and rmc_status_valid. */
 
     uint8_t  utc_hour;
     uint8_t  utc_minute;
-    float    utc_second;     /**< Fractional seconds as reported (GGA/RMC
-                                   both carry hhmmss.sss to the same
-                                   precision). */
-    uint8_t  utc_day;        /**< 1-31, from RMC field 9 (ddmmyy). 0 if
-                                   no RMC sentence has been seen yet. */
+    float    utc_second;     /**< Fractional seconds as reported. */
+    uint8_t  utc_day;        /**< 1-31, from RMC field 9 (ddmmyy). */
     uint8_t  utc_month;      /**< 1-12. */
-    uint16_t utc_year;       /**< Expanded to 20xx — see gps_nmea.c's
-                                   NMEA_ParseRMC() header comment for why
-                                   that Y2K-style assumption is acceptable
-                                   here and how to revisit it. */
+    uint16_t utc_year;       /**< Expanded to 20xx. */
 
-    bool     rmc_status_valid; /**< RMC field 2: 'A' = data valid, 'V' =
-                                     receiver warning (no fix). Kept
-                                     alongside fix_quality rather than
-                                     collapsed into it, since GGA and RMC
-                                     are independent sentences that can
-                                     (rarely, momentarily) disagree. */
+    bool     rmc_status_valid; /**< RMC/GLL field: 'A' = data valid, 'V' = warning. */
+    char     mode_indicator;   /**< Mode indicator: 'A'=Autonomous, 'D'=DGPS, 'E'=Estimated, 'N'=Not valid. */
 
-    char     talker_id[3];   /**< "GP"/"GN"/"GL"/"GA"/"BD"/"QZ"/... plus a
-                                   null terminator — which constellation
-                                   the most recently parsed sentence came
-                                   from. See GPS_ReadDeviceID(). */
+    char     talker_id[3];   /**< "GP"/"GN"/"GL"/"GA"/"BD"/"GB"/... null-terminated. */
 
-    uint32_t sentences_parsed;   /**< Rolling count of checksum-valid,
-                                       recognized (GGA/RMC) sentences. */
-    uint32_t checksum_errors;    /**< Rolling count — see GPS_ERROR_CHECKSUM. */
-    uint32_t unsupported_sentences; /**< Rolling count of checksum-valid
-                                          sentences of a type this driver
-                                          doesn't decode (GSA/GSV/VTG/...). */
+    uint32_t sentences_parsed;       /**< Rolling count of checksum-valid recognized sentences. */
+    uint32_t checksum_errors;        /**< Rolling count — see GPS_ERROR_CHECKSUM. */
+    uint32_t unsupported_sentences; /**< Rolling count of unparsed sentences (e.g. GSV, ZDA). */
 } GPS_Data_t;
 
 /**
@@ -303,6 +316,66 @@ GPS_Status_t GPS_Process(GPS_Handle_t *handle);
  * @retval GPS_OK on success; GPS_ERROR_BUS on a transmit failure.
  */
 GPS_Status_t GPS_SendRawCommand(GPS_Handle_t *handle, const uint8_t *data, uint16_t length);
+
+/*============================================================================*
+ *                   u-blox NEO-M8N UBX PROTOCOL & CONFIGURATION              *
+ *============================================================================*/
+
+/**
+ * @brief Constructs and transmits an arbitrary UBX protocol frame with
+ *        valid Fletcher checksums (CK_A, CK_B).
+ * @param handle     Initialized device instance.
+ * @param msg_class  UBX message class (e.g. 0x06 for UBX-CFG).
+ * @param msg_id     UBX message ID (e.g. 0x08 for UBX-CFG-RATE).
+ * @param payload    Payload bytes (can be NULL if length is 0).
+ * @param length     Payload length in bytes.
+ * @retval GPS_OK on success; error code otherwise.
+ */
+GPS_Status_t NEO_M8N_SendUBX(GPS_Handle_t *handle, uint8_t msg_class, uint8_t msg_id,
+                            const uint8_t *payload, uint16_t length);
+
+/**
+ * @brief Configures the UART1 port baud rate on the NEO-M8N via UBX-CFG-PRT.
+ * @param handle     Initialized device instance.
+ * @param baud_rate  Target baud rate (e.g. 9600, 38400, 57600, 115200).
+ */
+GPS_Status_t NEO_M8N_SetBaudRate(GPS_Handle_t *handle, uint32_t baud_rate);
+
+/**
+ * @brief Sets the measurement / navigation solution update rate via UBX-CFG-RATE.
+ * @param handle   Initialized device instance.
+ * @param rate_ms  Measurement period in ms (e.g. 100ms = 10Hz, 200ms = 5Hz, 1000ms = 1Hz).
+ */
+GPS_Status_t NEO_M8N_SetUpdateRate(GPS_Handle_t *handle, uint16_t rate_ms);
+
+/**
+ * @brief Sets the dynamic platform model for navigation engine via UBX-CFG-NAV5.
+ * @param handle Initialized device instance.
+ * @param model  Dynamic model (e.g. GPS_DYNMODEL_AIRBORNE_4G for UAVs).
+ */
+GPS_Status_t NEO_M8N_SetDynamicModel(GPS_Handle_t *handle, GPS_DynamicModel_t model);
+
+/**
+ * @brief Configures the output rate of a specific NMEA / UBX message via UBX-CFG-MSG.
+ * @param handle     Initialized device instance.
+ * @param msg_class  Message class (0xF0 for standard NMEA, 0xF1 for PUBX, 0x01 for UBX-NAV).
+ * @param msg_id     Message ID (e.g. 0x00=GGA, 0x04=RMC, 0x05=VTG, 0x02=GSA, 0x03=GSV).
+ * @param rate       Rate relative to navigation rate (0 = disabled, 1 = every fix).
+ */
+GPS_Status_t NEO_M8N_SetMessageRate(GPS_Handle_t *handle, uint8_t msg_class, uint8_t msg_id, uint8_t rate);
+
+/**
+ * @brief Saves current configuration to battery-backed RAM and Flash via UBX-CFG-CFG.
+ * @param handle Initialized device instance.
+ */
+GPS_Status_t NEO_M8N_SaveConfig(GPS_Handle_t *handle);
+
+/**
+ * @brief Triggers a receiver reset (Hot, Warm, or Cold start) via UBX-CFG-RST.
+ * @param handle     Initialized device instance.
+ * @param reset_type Reset type (GPS_RESET_HOT_START, GPS_RESET_WARM_START, GPS_RESET_COLD_START).
+ */
+GPS_Status_t NEO_M8N_HardwareReset(GPS_Handle_t *handle, GPS_ResetType_t reset_type);
 
 #ifdef __cplusplus
 }

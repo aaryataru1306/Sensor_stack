@@ -56,16 +56,8 @@ extern "C" {
 #define PIN_SPI1_MISO       6U    /**< PA6 — SPI1_MISO, AF5. */
 #define PIN_SPI1_MOSI       7U    /**< PA7 — SPI1_MOSI, AF5. */
 
-#define PIN_ICM20948_CS     3U    /**< PA3 — ICM20948 chip-select, active low. */
+#define PIN_ICM20948_CS     1U    /**< PA1 — ICM20948 chip-select, active low (PA3 freed for USART2_RX). */
 #define PIN_BMP388_CS       4U    /**< PA4 — BMP388 chip-select, active low. */
-
-/**
- * @warning If you run the GPS on USART2 (PA2 = TX, PA3 = RX), PA3 is
- *          taken and **cannot** be the ICM20948 CS. In that case move
- *          the ICM CS to a free pin (PB0, PB1, PA1, ...) and update
- *          PIN_ICM20948_CS here and SPI1_CS_ICM20948_PIN in
- *          spi_driver.h.
- */
 /** @} */
 
 /*============================================================================*

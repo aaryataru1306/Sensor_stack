@@ -191,9 +191,9 @@ static uint32_t parse_uint(const char *field)
 }
 
 /** @brief Hand-rolled decimal (fixed or floating notation) parse — NMEA
- *         numeric fields are always plain ASCII decimals like "4807.038"
- *         or "1" or "-0.9", never scientific notation, so this doesn't
- *         need strtod()'s full generality. */
+ *         numeric fields are always plain ASCII decimals like "4807.03824"
+ *         or "1" or "-0.9", never scientific notation. Uses integer accumulator
+ *         and divisor for fractional part to eliminate floating-point precision loss. */
 static double parse_double(const char *field)
 {
     if (field == NULL || field[0] == '\0') {
@@ -218,12 +218,14 @@ static double parse_double(const char *field)
     double frac_part = 0.0;
     if (*p == '.') {
         p++;
-        double scale = 0.1;
+        double frac_val = 0.0;
+        double divisor = 1.0;
         while (*p >= '0' && *p <= '9') {
-            frac_part += (double)(*p - '0') * scale;
-            scale *= 0.1;
+            frac_val = (frac_val * 10.0) + (double)(*p - '0');
+            divisor *= 10.0;
             p++;
         }
+        frac_part = frac_val / divisor;
     }
 
     double value = int_part + frac_part;
@@ -232,10 +234,10 @@ static double parse_double(const char *field)
 
 /** @brief Converts an NMEA "ddmm.mmmm" / "dddmm.mmmm" coordinate field
  *         plus its hemisphere letter into signed decimal degrees.
- * @param degree_digits  2 for latitude, 3 for longitude (NMEA pads
- *                        longitude's degrees to 3 digits, latitude to 2
- *                        — the only structural difference between the
- *                        two fields).
+ * @details In NMEA standard, the minutes always occupy the 2 digits
+ *          immediately preceding the decimal point plus the fractional part.
+ *          Finding the decimal point dynamically makes this robust against
+ *          varying digit lengths.
  */
 static double nmea_coord_to_decimal(const char *field, char hemisphere, int degree_digits)
 {
@@ -243,15 +245,26 @@ static double nmea_coord_to_decimal(const char *field, char hemisphere, int degr
         return 0.0;
     }
 
-    char degrees_buf[4] = {0};
-    int i = 0;
-    for (; i < degree_digits && field[i] >= '0' && field[i] <= '9'; i++) {
-        degrees_buf[i] = field[i];
+    /* Find '.' to determine where degrees end and minutes begin */
+    const char *dot = strchr(field, '.');
+    int min_start = 0;
+    if (dot != NULL) {
+        int dot_pos = (int)(dot - field);
+        min_start = (dot_pos >= 2) ? (dot_pos - 2) : 0;
+    } else {
+        size_t len = strlen(field);
+        min_start = (len >= 2U) ? (int)(len - 2U) : (int)degree_digits;
     }
-    degrees_buf[i] = '\0';
 
-    double degrees = parse_double(degrees_buf);
-    double minutes = parse_double(&field[i]);
+    char deg_buf[8] = {0};
+    int d_len = (min_start < (int)sizeof(deg_buf) - 1) ? min_start : (int)sizeof(deg_buf) - 1;
+    if (d_len > 0) {
+        memcpy(deg_buf, field, (size_t)d_len);
+        deg_buf[d_len] = '\0';
+    }
+
+    double degrees = parse_double(deg_buf);
+    double minutes = parse_double(&field[min_start]);
     double decimal = degrees + (minutes / 60.0);
 
     if (hemisphere == 'S' || hemisphere == 'W' || hemisphere == 's' || hemisphere == 'w') {
@@ -274,15 +287,7 @@ static void nmea_parse_time(const char *field, uint8_t *hour, uint8_t *minute, f
 }
 
 /** @brief Splits an NMEA RMC "ddmmyy" date field, expanding the 2-digit
- *         year to 20xx.
- * @note  NMEA0183's 2-digit year is a known, real limitation of the
- *        sentence format itself (not something this driver chose to
- *        simplify) — every RMC-emitting receiver in the field today
- *        still only reports "yy". Assuming 2000+yy is correct for every
- *        currently-manufactured GPS module and stays correct until 2100;
- *        it is not correct for a receiver replaying pre-2000 dates
- *        (there are none). If this driver is still in service in 2100,
- *        this is the line to revisit. */
+ *         year to 20xx. */
 static void nmea_parse_date(const char *field, uint8_t *day, uint8_t *month, uint16_t *year)
 {
     if (field_is_empty(field) || day == NULL || month == NULL || year == NULL) {
@@ -302,29 +307,46 @@ static void nmea_parse_date(const char *field, uint8_t *day, uint8_t *month, uin
 
 NMEA_SentenceType_t NMEA_IdentifySentence(const char *payload)
 {
-    if (payload == NULL || strlen(payload) < 5U) {
+    if (payload == NULL) {
         return NMEA_SENTENCE_UNRECOGNIZED;
     }
-    /* payload[0..1] = talker ID (GP/GN/GL/GA/BD/QZ/...), payload[2..4] =
-     * sentence type — this driver deliberately does not care which
-     * talker ID precedes "GGA"/"RMC" (see this function's header
-     * comment). */
-    if (memcmp(&payload[2], "GGA", 3) == 0) {
+    const char *p = payload;
+    if (p[0] == '$') {
+        p++;
+    }
+    if (strlen(p) < 5U) {
+        return NMEA_SENTENCE_UNRECOGNIZED;
+    }
+    /* Check 3-character sentence mnemonic after 2-char talker ID */
+    if (memcmp(&p[2], "GGA", 3) == 0) {
         return NMEA_SENTENCE_GGA;
     }
-    if (memcmp(&payload[2], "RMC", 3) == 0) {
+    if (memcmp(&p[2], "RMC", 3) == 0) {
         return NMEA_SENTENCE_RMC;
+    }
+    if (memcmp(&p[2], "VTG", 3) == 0) {
+        return NMEA_SENTENCE_VTG;
+    }
+    if (memcmp(&p[2], "GSA", 3) == 0) {
+        return NMEA_SENTENCE_GSA;
+    }
+    if (memcmp(&p[2], "GLL", 3) == 0) {
+        return NMEA_SENTENCE_GLL;
     }
     return NMEA_SENTENCE_UNRECOGNIZED;
 }
 
 bool NMEA_ExtractTalkerId(const char *payload, char talker_id_out[2])
 {
-    if (payload == NULL || talker_id_out == NULL || strlen(payload) < 5U) {
+    if (payload == NULL || talker_id_out == NULL) {
         return false;
     }
-    talker_id_out[0] = payload[0];
-    talker_id_out[1] = payload[1];
+    const char *p = (payload[0] == '$') ? &payload[1] : payload;
+    if (strlen(p) < 5U) {
+        return false;
+    }
+    talker_id_out[0] = p[0];
+    talker_id_out[1] = p[1];
     return true;
 }
 
@@ -342,21 +364,33 @@ NMEA_SentenceType_t NMEA_ParseSentence(const char *payload, GPS_Data_t *fix)
     }
 
     NMEA_SentenceType_t type = NMEA_IdentifySentence(payload);
+    bool parsed = false;
     switch (type) {
         case NMEA_SENTENCE_GGA:
-            if (NMEA_ParseGGA(payload, fix)) {
-                fix->sentences_parsed++;
-            }
+            parsed = NMEA_ParseGGA(payload, fix);
             break;
         case NMEA_SENTENCE_RMC:
-            if (NMEA_ParseRMC(payload, fix)) {
-                fix->sentences_parsed++;
-            }
+            parsed = NMEA_ParseRMC(payload, fix);
+            break;
+        case NMEA_SENTENCE_VTG:
+            parsed = NMEA_ParseVTG(payload, fix);
+            break;
+        case NMEA_SENTENCE_GSA:
+            parsed = NMEA_ParseGSA(payload, fix);
+            break;
+        case NMEA_SENTENCE_GLL:
+            parsed = NMEA_ParseGLL(payload, fix);
             break;
         case NMEA_SENTENCE_UNRECOGNIZED:
         default:
             fix->unsupported_sentences++;
-            break;
+            return NMEA_SENTENCE_UNRECOGNIZED;
+    }
+
+    if (parsed) {
+        fix->sentences_parsed++;
+    } else {
+        fix->checksum_errors++;
     }
     return type;
 }
@@ -367,10 +401,10 @@ bool NMEA_ParseGGA(const char *payload, GPS_Data_t *fix)
         return false;
     }
 
-    const char *cursor = payload;
+    const char *cursor = (payload[0] == '$') ? &payload[1] : payload;
     char field[16];
 
-    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* header, e.g. "GPGGA" */
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* header, e.g. "GNGGA" */
 
     if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 1: time */
     uint8_t hour = fix->utc_hour, minute = fix->utc_minute;
@@ -407,9 +441,10 @@ bool NMEA_ParseGGA(const char *payload, GPS_Data_t *fix)
     if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 9: altitude */
     double altitude = field_is_empty(field) ? fix->altitude_m : parse_double(field);
 
-    /* Fields 10-13 (altitude unit, geoid separation + unit, DGPS age/ID)
-     * are not surfaced in GPS_Data_t (no flight-control consumer named in
-     * the task brief needs them) — intentionally not parsed. */
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 10: alt unit (M) */
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 11: geoid separation */
+    double geoid_sep = field_is_empty(field) ? fix->geoid_separation_m : parse_double(field);
 
     fix->utc_hour = hour;
     fix->utc_minute = minute;
@@ -424,6 +459,8 @@ bool NMEA_ParseGGA(const char *payload, GPS_Data_t *fix)
     fix->satellites_in_use = (uint8_t)satellites;
     fix->hdop = hdop;
     fix->altitude_m = altitude;
+    fix->geoid_separation_m = geoid_sep;
+    fix->has_fix = (fix->fix_quality > GPS_FIX_QUALITY_INVALID) && (fix->rmc_status_valid || fix->satellites_in_use >= 3);
 
     return true;
 }
@@ -434,7 +471,7 @@ bool NMEA_ParseRMC(const char *payload, GPS_Data_t *fix)
         return false;
     }
 
-    const char *cursor = payload;
+    const char *cursor = (payload[0] == '$') ? &payload[1] : payload;
     char field[16];
 
     if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* header */
@@ -478,16 +515,21 @@ bool NMEA_ParseRMC(const char *payload, GPS_Data_t *fix)
         nmea_parse_date(field, &day, &month, &year);
     }
 
-    /* Fields 10-12 (magnetic variation + sign, and the optional NMEA 2.3+
-     * "mode" field) are not surfaced in GPS_Data_t — not needed by any
-     * consumer named in the task brief, and reading them without
-     * validating the sentence's NMEA version would risk misparsing an
-     * older receiver's shorter RMC. */
+    /* Field 10 (mag var), 11 (E/W), 12 (mode indicator A/D/E/N) */
+    char mode_ind = fix->mode_indicator;
+    if (nmea_next_field(&cursor, field, sizeof(field))) { /* 10: mag var */
+        if (nmea_next_field(&cursor, field, sizeof(field))) { /* 11: E/W */
+            if (nmea_next_field(&cursor, field, sizeof(field)) && !field_is_empty(field)) { /* 12: mode */
+                mode_ind = field[0];
+            }
+        }
+    }
 
     fix->utc_hour = hour;
     fix->utc_minute = minute;
     fix->utc_second = second;
     fix->rmc_status_valid = status_valid;
+    fix->mode_indicator = mode_ind;
     if (have_lat) {
         fix->latitude_deg = nmea_coord_to_decimal(lat_field, ns, 2);
     }
@@ -495,10 +537,150 @@ bool NMEA_ParseRMC(const char *payload, GPS_Data_t *fix)
         fix->longitude_deg = nmea_coord_to_decimal(lon_field, ew, 3);
     }
     fix->speed_knots = speed_knots;
+    fix->speed_kmh = speed_knots * 1.852;
+    fix->speed_mps = fix->speed_kmh / 3.6;
     fix->course_deg = course;
     fix->utc_day = day;
     fix->utc_month = month;
     fix->utc_year = year;
+    fix->has_fix = status_valid && (fix->fix_quality > GPS_FIX_QUALITY_INVALID || fix->satellites_in_use >= 3);
+
+    return true;
+}
+
+bool NMEA_ParseVTG(const char *payload, GPS_Data_t *fix)
+{
+    if (payload == NULL || fix == NULL) {
+        return false;
+    }
+
+    const char *cursor = (payload[0] == '$') ? &payload[1] : payload;
+    char field[16];
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* header */
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 1: true course */
+    double course_true = field_is_empty(field) ? fix->course_deg : parse_double(field);
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 2: T */
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 3: magnetic course */
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 4: M */
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 5: speed knots */
+    double speed_knots = field_is_empty(field) ? fix->speed_knots : parse_double(field);
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 6: N */
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 7: speed km/h */
+    double speed_kmh = field_is_empty(field) ? (speed_knots * 1.852) : parse_double(field);
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 8: K */
+
+    if (nmea_next_field(&cursor, field, sizeof(field)) && !field_is_empty(field)) { /* 9: mode */
+        fix->mode_indicator = field[0];
+    }
+
+    fix->course_deg = course_true;
+    fix->speed_knots = speed_knots;
+    fix->speed_kmh = speed_kmh;
+    fix->speed_mps = speed_kmh / 3.6;
+
+    return true;
+}
+
+bool NMEA_ParseGSA(const char *payload, GPS_Data_t *fix)
+{
+    if (payload == NULL || fix == NULL) {
+        return false;
+    }
+
+    const char *cursor = (payload[0] == '$') ? &payload[1] : payload;
+    char field[16];
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* header */
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 1: mode M/A */
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 2: fix mode 1/2/3 */
+    uint32_t mode = parse_uint(field);
+    if (mode >= 1U && mode <= 3U) {
+        fix->fix_mode = (GPS_FixMode_t)mode;
+    }
+
+    /* 3-14: satellite PRNs */
+    for (int i = 0; i < 12; i++) {
+        if (!nmea_next_field(&cursor, field, sizeof(field))) return false;
+    }
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 15: PDOP */
+    if (!field_is_empty(field)) {
+        fix->pdop = parse_double(field);
+    }
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 16: HDOP */
+    if (!field_is_empty(field)) {
+        fix->hdop = parse_double(field);
+    }
+
+    if (nmea_next_field(&cursor, field, sizeof(field)) && !field_is_empty(field)) { /* 17: VDOP */
+        fix->vdop = parse_double(field);
+    }
+
+    return true;
+}
+
+bool NMEA_ParseGLL(const char *payload, GPS_Data_t *fix)
+{
+    if (payload == NULL || fix == NULL) {
+        return false;
+    }
+
+    const char *cursor = (payload[0] == '$') ? &payload[1] : payload;
+    char field[16];
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* header */
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 1: lat */
+    char lat_field[16];
+    memcpy(lat_field, field, sizeof(lat_field));
+    bool have_lat = !field_is_empty(field);
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 2: N/S */
+    char ns = field[0];
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 3: lon */
+    char lon_field[16];
+    memcpy(lon_field, field, sizeof(lon_field));
+    bool have_lon = !field_is_empty(field);
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 4: E/W */
+    char ew = field[0];
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 5: time */
+    if (!field_is_empty(field)) {
+        uint8_t hour = fix->utc_hour, minute = fix->utc_minute;
+        float second = fix->utc_second;
+        nmea_parse_time(field, &hour, &minute, &second);
+        fix->utc_hour = hour;
+        fix->utc_minute = minute;
+        fix->utc_second = second;
+    }
+
+    if (!nmea_next_field(&cursor, field, sizeof(field))) return false; /* 6: status A/V */
+    bool valid = (field[0] == 'A');
+    fix->rmc_status_valid = valid;
+
+    if (nmea_next_field(&cursor, field, sizeof(field)) && !field_is_empty(field)) { /* 7: mode */
+        fix->mode_indicator = field[0];
+    }
+
+    if (have_lat) {
+        fix->latitude_deg = nmea_coord_to_decimal(lat_field, ns, 2);
+    }
+    if (have_lon) {
+        fix->longitude_deg = nmea_coord_to_decimal(lon_field, ew, 3);
+    }
 
     return true;
 }

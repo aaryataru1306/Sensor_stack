@@ -31,11 +31,11 @@
 extern "C" {
 #endif
 
-/** @brief Capacity in bytes. 128 comfortably holds the longest NMEA0183
- *         sentence (82 chars incl. '$'..CRLF, per the spec) plus headroom
- *         for a second sentence's worth of margin while the consumer is
- *         momentarily behind. Must stay a power of two (see file header). */
-#define GPS_RINGBUFFER_CAPACITY 128U
+/** @brief Capacity in bytes. 512 comfortably holds multi-sentence GNSS
+ *         bursts (GGA, RMC, VTG, GSA, GSV, GLL) output by multi-constellation
+ *         receivers such as the u-blox NEO-M8N without dropping bytes.
+ *         Must stay a power of two. */
+#define GPS_RINGBUFFER_CAPACITY 512U
 
 typedef struct GPS_RingBuffer {
     uint8_t  data[GPS_RINGBUFFER_CAPACITY];

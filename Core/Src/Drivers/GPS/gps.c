@@ -185,3 +185,133 @@ GPS_Status_t GPS_SendRawCommand(GPS_Handle_t *handle, const uint8_t *data, uint1
     }
     return GPS_OK;
 }
+
+/*============================================================================*
+ *                   u-blox NEO-M8N UBX PROTOCOL & CONFIGURATION              *
+ *============================================================================*/
+
+GPS_Status_t NEO_M8N_SendUBX(GPS_Handle_t *handle, uint8_t msg_class, uint8_t msg_id,
+                            const uint8_t *payload, uint16_t length)
+{
+    if (handle == NULL || (!handle->initialized)) {
+        return GPS_ERROR_NOT_INITIALIZED;
+    }
+    if (payload == NULL && length > 0U) {
+        return GPS_ERROR_INVALID_PARAM;
+    }
+
+    /* UBX Frame: Sync(2) + Class(1) + ID(1) + Length(2) + Payload(N) + Checksum(2) */
+    uint8_t header[6];
+    header[0] = 0xB5U; /* Sync 1 */
+    header[1] = 0x62U; /* Sync 2 */
+    header[2] = msg_class;
+    header[3] = msg_id;
+    header[4] = (uint8_t)(length & 0xFFU);
+    header[5] = (uint8_t)((length >> 8U) & 0xFFU);
+
+    /* Fletcher 8-bit Checksum (RFC 1145) calculated over Class, ID, Length, and Payload */
+    uint8_t ck_a = 0U;
+    uint8_t ck_b = 0U;
+    for (int i = 2; i < 6; i++) {
+        ck_a = (uint8_t)(ck_a + header[i]);
+        ck_b = (uint8_t)(ck_b + ck_a);
+    }
+    for (uint16_t i = 0U; i < length; i++) {
+        ck_a = (uint8_t)(ck_a + payload[i]);
+        ck_b = (uint8_t)(ck_b + ck_a);
+    }
+    uint8_t checksum[2] = { ck_a, ck_b };
+
+    /* Transmit frame */
+    if (GPS_BusWrite(handle->bus_context, header, 6U) != 0) {
+        handle->fault_count++;
+        handle->last_error = GPS_ERROR_BUS;
+        return GPS_ERROR_BUS;
+    }
+    if (length > 0U && payload != NULL) {
+        if (GPS_BusWrite(handle->bus_context, payload, length) != 0) {
+            handle->fault_count++;
+            handle->last_error = GPS_ERROR_BUS;
+            return GPS_ERROR_BUS;
+        }
+    }
+    if (GPS_BusWrite(handle->bus_context, checksum, 2U) != 0) {
+        handle->fault_count++;
+        handle->last_error = GPS_ERROR_BUS;
+        return GPS_ERROR_BUS;
+    }
+
+    return GPS_OK;
+}
+
+GPS_Status_t NEO_M8N_SetBaudRate(GPS_Handle_t *handle, uint32_t baud_rate)
+{
+    /* UBX-CFG-PRT (Class 0x06, ID 0x00, Length 20 bytes for UART1) */
+    uint8_t payload[20] = {0};
+    payload[0]  = 1U;    /* portID: 1 = UART1 */
+    payload[4]  = 0xD0U; /* 8N1 mode (8 data bits, no parity, 1 stop bit) */
+    payload[5]  = 0x08U;
+    payload[8]  = (uint8_t)(baud_rate & 0xFFU);
+    payload[9]  = (uint8_t)((baud_rate >> 8U) & 0xFFU);
+    payload[10] = (uint8_t)((baud_rate >> 16U) & 0xFFU);
+    payload[11] = (uint8_t)((baud_rate >> 24U) & 0xFFU);
+    payload[12] = 0x07U; /* inProtoMask: UBX + NMEA + RTCM */
+    payload[14] = 0x03U; /* outProtoMask: UBX + NMEA */
+
+    return NEO_M8N_SendUBX(handle, 0x06U, 0x00U, payload, sizeof(payload));
+}
+
+GPS_Status_t NEO_M8N_SetUpdateRate(GPS_Handle_t *handle, uint16_t rate_ms)
+{
+    /* UBX-CFG-RATE (Class 0x06, ID 0x08, Length 6 bytes) */
+    uint8_t payload[6] = {0};
+    payload[0] = (uint8_t)(rate_ms & 0xFFU);
+    payload[1] = (uint8_t)((rate_ms >> 8U) & 0xFFU);
+    payload[2] = 1U; /* navRate = 1 fix cycle */
+    payload[4] = 1U; /* timeRef = 1 (GPS time) */
+
+    return NEO_M8N_SendUBX(handle, 0x06U, 0x08U, payload, sizeof(payload));
+}
+
+GPS_Status_t NEO_M8N_SetDynamicModel(GPS_Handle_t *handle, GPS_DynamicModel_t model)
+{
+    /* UBX-CFG-NAV5 (Class 0x06, ID 0x24, Length 36 bytes) */
+    uint8_t payload[36] = {0};
+    payload[0] = 0x01U; /* mask: apply dynModel */
+    payload[2] = (uint8_t)model;
+    payload[3] = 3U;    /* fixMode: 3 = Auto 2D/3D */
+
+    return NEO_M8N_SendUBX(handle, 0x06U, 0x24U, payload, sizeof(payload));
+}
+
+GPS_Status_t NEO_M8N_SetMessageRate(GPS_Handle_t *handle, uint8_t msg_class, uint8_t msg_id, uint8_t rate)
+{
+    /* UBX-CFG-MSG (Class 0x06, ID 0x01, Length 8 bytes) */
+    uint8_t payload[8] = {0};
+    payload[0] = msg_class;
+    payload[1] = msg_id;
+    payload[3] = rate; /* UART1 rate */
+
+    return NEO_M8N_SendUBX(handle, 0x06U, 0x01U, payload, sizeof(payload));
+}
+
+GPS_Status_t NEO_M8N_SaveConfig(GPS_Handle_t *handle)
+{
+    /* UBX-CFG-CFG (Class 0x06, ID 0x09, Length 13 bytes) */
+    uint8_t payload[13] = {0};
+    payload[4]  = 0x1FU; /* saveMask: save ioPort, msgConf, infMsg, navConf, rxmConf */
+    payload[12] = 0x17U; /* deviceMask: devBBR=1, devFlash=1, devEEPROM=1, devSpiFlash=1 */
+
+    return NEO_M8N_SendUBX(handle, 0x06U, 0x09U, payload, sizeof(payload));
+}
+
+GPS_Status_t NEO_M8N_HardwareReset(GPS_Handle_t *handle, GPS_ResetType_t reset_type)
+{
+    /* UBX-CFG-RST (Class 0x06, ID 0x13, Length 4 bytes) */
+    uint8_t payload[4] = {0};
+    payload[0] = (uint8_t)(reset_type & 0xFFU);
+    payload[1] = (uint8_t)((reset_type >> 8U) & 0xFFU);
+    payload[2] = 0x00U; /* resetMode: 0 = Hardware reset (watchdog) immediately */
+
+    return NEO_M8N_SendUBX(handle, 0x06U, 0x13U, payload, sizeof(payload));
+}

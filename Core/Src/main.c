@@ -9,7 +9,7 @@
  *
  *     1. SystemClock_Config()      — HSE 25 MHz -> PLL -> 100 MHz SYSCLK
  *     2. SPI1_Init()               — shared bus, both CS lines idle high
- *     3. ICM20948_Init()           — primary IMU, SPI1 CS = PA3
+ *     3. ICM20948_Init()           — primary IMU, SPI1 CS = PA1
  *     4. BMP388_Init()             — barometer, SPI1 CS = PA4
  *     5. MPU6050_enumInit()        — secondary IMU, I2C1 (PB6/PB7)
  *     6. gps_bus_stm32_setup()     — USART2 (PA2/PA3) RCC + GPIO + UART
@@ -115,7 +115,7 @@
 
 #define PWR_CR_VOS_SCALE1     (3U << 14)
 
-static void SystemClock_Config(void)
+void SystemClock_Config(void)
 {
     /* 1. Enable PWR clock, then select regulator scale 1. */
     RCC_APB1ENR |= RCC_APB1ENR_PWREN;
@@ -232,9 +232,8 @@ int main(void)
 
     /* ---- 6. GPS on USART2 (PA2 = TX, PA3 = RX). ----
      *
-     * @warning PA3 doubles as ICM20948_CS. If both ICM and GPS are
-     *          populated on the same board, one of them must move. See
-     *          the note in main.h for the three options. */
+     * Bare-metal USART2 peripheral and GPIO setup at 9600 baud (NEO-M8N default).
+     * ICM20948 CS is on PA1, freeing PA3 for USART2_RX. */
     gps_bus_stm32_setup(PCLK1_HZ, 9600U);
 
     g_gps.bus_context = 0;

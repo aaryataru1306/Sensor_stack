@@ -46,7 +46,7 @@ extern "C" {
  *         framer's checksum check exists to catch) could otherwise run
  *         past a razor-thin buffer before the framer notices anything is
  *         wrong. */
-#define NMEA_MAX_PAYLOAD_LEN 96U
+#define NMEA_MAX_PAYLOAD_LEN 128U
 
 typedef enum {
     NMEA_FEED_PENDING = 0,     /**< Still accumulating; nothing to do yet. */
@@ -117,63 +117,54 @@ NMEA_FeedResult_t NMEA_Feed(NMEA_Parser_t *parser, uint8_t byte);
 
 typedef enum {
     NMEA_SENTENCE_UNRECOGNIZED = 0, /**< Well-formed, checksum-valid, but
-                                          not a type this driver decodes
-                                          (GSA/GSV/VTG/GLL/ZDA/...). */
-    NMEA_SENTENCE_GGA,
-    NMEA_SENTENCE_RMC
+                                          not a type this driver decodes. */
+    NMEA_SENTENCE_GGA,              /**< $--GGA: Fix data (time, lat, lon, fix quality, sats, HDOP, alt) */
+    NMEA_SENTENCE_RMC,              /**< $--RMC: Recommended minimum data (time, valid, lat, lon, speed, course, date) */
+    NMEA_SENTENCE_VTG,              /**< $--VTG: Vector track & ground speed (course true/mag, speed knots/kmh) */
+    NMEA_SENTENCE_GSA,              /**< $--GSA: GNSS DOP and active satellites (2D/3D mode, PDOP, HDOP, VDOP) */
+    NMEA_SENTENCE_GLL               /**< $--GLL: Geographic position (lat, lon, time, status) */
 } NMEA_SentenceType_t;
 
 /**
  * @brief Identifies a payload's sentence type from its 5-character header
  *        field (2-char talker ID + 3-char sentence ID, e.g. "GPGGA",
- *        "GNRMC") without needing to know which specific talker ID the
- *        module uses — this driver treats GPGGA/GNGGA/GLGGA/GAGGA/BDGGA/
- *        ... all identically, matching every real multi-constellation
- *        receiver's actual output.
+ *        "GNRMC", "GNVTG", "GNGSA", "GNGLL") without needing to know which
+ *        specific talker ID the module uses.
  */
 NMEA_SentenceType_t NMEA_IdentifySentence(const char *payload);
 
 /**
  * @brief Extracts the 2-character talker ID from a payload's header
- *        field (e.g. "GP" from "GPGGA,..."). Used by GPS_ReadDeviceID().
- * @retval true if payload is at least 5 characters (a valid header could
- *         be present); false otherwise. Does not itself validate that
- *         payload[2..4] is a recognized sentence type — call
- *         NMEA_IdentifySentence() for that.
+ *        field (e.g. "GP"/"GN" from "GNGGA,...").
+ * @retval true if payload is at least 5 characters; false otherwise.
  */
 bool NMEA_ExtractTalkerId(const char *payload, char talker_id_out[2]);
 
 /**
- * @brief Dispatches to NMEA_ParseGGA() / NMEA_ParseRMC() based on
- *        NMEA_IdentifySentence(), and updates fix->talker_id and the
- *        rolling sentences_parsed/unsupported_sentences counters
- *        regardless of type.
+ * @brief Dispatches to NMEA_ParseGGA() / NMEA_ParseRMC() / NMEA_ParseVTG() /
+ *        NMEA_ParseGSA() / NMEA_ParseGLL() based on NMEA_IdentifySentence().
  * @param[in]     payload   A framer-validated payload (see NMEA_Feed()).
  * @param[in,out] fix       Updated in place — only the fields the
  *                          identified sentence type actually carries are
- *                          touched; see gps.h's GPS_Data_t comment for
- *                          why fields are merged rather than replaced
- *                          wholesale on every call.
- * @retval NMEA_SENTENCE_GGA / NMEA_SENTENCE_RMC if decoded and fix was
- *         updated.
- * @retval NMEA_SENTENCE_UNRECOGNIZED if the type isn't one this driver
- *         decodes (fix->talker_id and fix->unsupported_sentences are
- *         still updated; nothing else is touched).
+ *                          touched.
+ * @retval Identified sentence type enum value.
  */
 NMEA_SentenceType_t NMEA_ParseSentence(const char *payload, GPS_Data_t *fix);
 
-/** @brief Decodes a $--GGA payload (talker+"GGA" header already
- *         consumed by the caller is NOT assumed — pass the full payload
- *         starting at the talker ID; this function skips the header
- *         field itself). See NMEA_ParseSentence() for the merge-not-
- *         replace field-update contract.
- * @retval true if the sentence had enough comma-delimited fields to be a
- *         plausible GGA (malformed/truncated sentences that still passed
- *         checksum are rejected rather than partially applied). */
+/** @brief Decodes a $--GGA payload. */
 bool NMEA_ParseGGA(const char *payload, GPS_Data_t *fix);
 
-/** @brief Decodes a $--RMC payload. See NMEA_ParseGGA()'s comment. */
+/** @brief Decodes a $--RMC payload. */
 bool NMEA_ParseRMC(const char *payload, GPS_Data_t *fix);
+
+/** @brief Decodes a $--VTG payload. */
+bool NMEA_ParseVTG(const char *payload, GPS_Data_t *fix);
+
+/** @brief Decodes a $--GSA payload. */
+bool NMEA_ParseGSA(const char *payload, GPS_Data_t *fix);
+
+/** @brief Decodes a $--GLL payload. */
+bool NMEA_ParseGLL(const char *payload, GPS_Data_t *fix);
 
 #ifdef __cplusplus
 }
