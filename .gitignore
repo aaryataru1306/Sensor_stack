@@ -1,0 +1,10 @@
+firmware_test/build/
+firmware_test/*.elf
+firmware_test/*.hex
+firmware_test/*.bin
+firmware_test/*.map
+firmware_test/build/
+firmware_test/*.elf
+firmware_test/*.hex
+firmware_test/*.bin
+firmware_test/*.map
