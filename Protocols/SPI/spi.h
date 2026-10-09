@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include "stm32f411xe.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* SPI1 Pin Mapping (Fixed to GPIOA) */
 #define SPI1_SCK_PIN          5U   /* PA5 - SCK */
 #define SPI1_MISO_PIN         6U   /* PA6 - MISO */
@@ -22,5 +26,9 @@ void SPI_CS_Deselect(uint8_t pinNumber);
 uint8_t SPI1_TransferByte(uint8_t data);
 void SPI1_ReadRegisters(uint8_t cs_pin, uint8_t reg_addr, uint8_t *buffer, uint16_t length);
 void SPI1_WriteRegister(uint8_t cs_pin, uint8_t reg_addr, uint8_t value);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
