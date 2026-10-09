@@ -1,5 +1,6 @@
 #include "bmp388.h"
-#include "spi_driver.h"
+#include "spi.h"
+#include <stdint.h>
 
 /* BMP388 register addresses */
 #define REG_STATUS          0x03U
@@ -13,7 +14,7 @@
 
 #define SOFT_RESET_COMMAND  0xB6U
 
-/* Data-ready flags in STATUS register */
+/* Data-ready flags */
 #define BMP388_PRESS_READY  (1U << 5)
 #define BMP388_TEMP_READY   (1U << 6)
 #define BMP388_DATA_READY   (BMP388_PRESS_READY | BMP388_TEMP_READY)
@@ -27,22 +28,9 @@
 
 typedef struct
 {
-    float t1;
-    float t2;
-    float t3;
-
-    float p1;
-    float p2;
-    float p3;
-    float p4;
-    float p5;
-    float p6;
-    float p7;
-    float p8;
-    float p9;
-    float p10;
-    float p11;
-
+    float t1, t2, t3;
+    float p1, p2, p3, p4, p5, p6;
+    float p7, p8, p9, p10, p11;
     float t_lin;
     uint8_t valid;
 } BMP388_Calibration;
@@ -50,24 +38,24 @@ typedef struct
 static BMP388_Calibration calib = {0};
 
 /* ---------------------------------------------------------
- * SPI register access
+ * SPI register access using the team's shared SPI driver
  * --------------------------------------------------------- */
 
 static int read_registers(uint8_t reg,
                           uint8_t *buffer,
                           uint16_t length)
 {
-    if ((buffer == 0) || (length == 0U))
+    if ((buffer == 0U) || (length == 0U))
     {
         return BMP388_ERROR;
     }
 
-    SPI1_CS_Enable(SPI1_CS_BMP388_PIN);
+    SPI_CS_Select(SPI1_CS_BMP388_PIN);
 
-    /* BMP388 SPI read: bit 7 set. */
+    /* BMP388 SPI read: set bit 7 of the register address. */
     (void)SPI1_TransferByte((uint8_t)(reg | 0x80U));
 
-    /* BMP388 requires a dummy byte after the address. */
+    /* BMP388 SPI read protocol requires a dummy byte. */
     (void)SPI1_TransferByte(0x00U);
 
     for (uint16_t i = 0U; i < length; i++)
@@ -75,20 +63,20 @@ static int read_registers(uint8_t reg,
         buffer[i] = SPI1_TransferByte(0x00U);
     }
 
-    SPI1_CS_Disable(SPI1_CS_BMP388_PIN);
+    SPI_CS_Deselect(SPI1_CS_BMP388_PIN);
 
     return BMP388_OK;
 }
 
 static int write_register(uint8_t reg, uint8_t value)
 {
-    SPI1_CS_Enable(SPI1_CS_BMP388_PIN);
+    SPI_CS_Select(SPI1_CS_BMP388_PIN);
 
-    /* Write address: bit 7 cleared. */
+    /* BMP388 SPI write: bit 7 cleared. */
     (void)SPI1_TransferByte((uint8_t)(reg & 0x7FU));
     (void)SPI1_TransferByte(value);
 
-    SPI1_CS_Disable(SPI1_CS_BMP388_PIN);
+    SPI_CS_Deselect(SPI1_CS_BMP388_PIN);
 
     return BMP388_OK;
 }
@@ -126,44 +114,24 @@ static int read_calibration(void)
         return BMP388_ERROR;
     }
 
-    /*
-     * Temperature coefficients.
-     */
-    calib.t1 = (float)read_u16_le(&c[0])
-               / 256.0f;
+    /* Temperature coefficients */
+    calib.t1 = (float)read_u16_le(&c[0]) / 256.0f;
+    calib.t2 = (float)read_u16_le(&c[2]) / 1073741824.0f;
+    calib.t3 = (float)(int8_t)c[4] / 281474976710656.0f;
 
-    calib.t2 = (float)read_u16_le(&c[2])
-               / 1073741824.0f;
-
-    calib.t3 = (float)(int8_t)c[4]
-               / 281474976710656.0f;
-
-    /*
-     * Pressure coefficients.
-     */
+    /* Pressure coefficients */
     calib.p1 = ((float)read_s16_le(&c[5]) - 16384.0f)
                / 1048576.0f;
 
     calib.p2 = ((float)read_s16_le(&c[7]) - 16384.0f)
                / 536870912.0f;
 
-    calib.p3 = (float)(int8_t)c[9]
-               / 2147483648.0f;
-
-    calib.p4 = (float)(int8_t)c[10]
-               / 137438953472.0f;
-
-    calib.p5 = (float)read_u16_le(&c[11])
-               / 8.0f;
-
-    calib.p6 = (float)read_u16_le(&c[13])
-               / 64.0f;
-
-    calib.p7 = (float)(int8_t)c[15]
-               / 256.0f;
-
-    calib.p8 = (float)(int8_t)c[16]
-               / 32768.0f;
+    calib.p3 = (float)(int8_t)c[9] / 2147483648.0f;
+    calib.p4 = (float)(int8_t)c[10] / 137438953472.0f;
+    calib.p5 = (float)read_u16_le(&c[11]) / 8.0f;
+    calib.p6 = (float)read_u16_le(&c[13]) / 64.0f;
+    calib.p7 = (float)(int8_t)c[15] / 256.0f;
+    calib.p8 = (float)(int8_t)c[16] / 32768.0f;
 
     calib.p9 = (float)read_s16_le(&c[17])
                / 281474976710656.0f;
@@ -185,14 +153,12 @@ static int read_calibration(void)
 
 int BMP388_ReadChipID(uint8_t *chip_id)
 {
-    if (chip_id == 0)
+    if (chip_id == 0U)
     {
         return BMP388_ERROR;
     }
 
-    return read_registers(BMP388_REG_CHIP_ID,
-                          chip_id,
-                          1U);
+    return read_registers(BMP388_REG_CHIP_ID, chip_id, 1U);
 }
 
 /* ---------------------------------------------------------
@@ -205,23 +171,19 @@ int BMP388_Init(void)
 
     calib.valid = 0U;
 
-    /* Issue soft reset. */
-    if (write_register(REG_CMD,
-                       SOFT_RESET_COMMAND) != BMP388_OK)
+    /* Issue soft reset */
+    if (write_register(REG_CMD, SOFT_RESET_COMMAND) != BMP388_OK)
     {
         return BMP388_ERROR;
     }
 
-    /*
-     * Temporary startup delay.
-     * This loop is not a calibrated millisecond delay.
-     */
+    /* Temporary startup delay; not a calibrated time delay. */
     for (volatile uint32_t i = 0U; i < 100000U; i++)
     {
         __asm volatile ("nop");
     }
 
-    /* Verify the device identity. */
+    /* Verify device identity */
     if (BMP388_ReadChipID(&chip_id) != BMP388_OK)
     {
         return BMP388_ERROR;
@@ -232,13 +194,13 @@ int BMP388_Init(void)
         return BMP388_INVALID_ID;
     }
 
-    /* Read factory calibration coefficients. */
+    /* Read factory calibration coefficients */
     if (read_calibration() != BMP388_OK)
     {
         return BMP388_ERROR;
     }
 
-    /* Temperature oversampling x2; pressure oversampling x4. */
+    /* Temperature oversampling x2; pressure oversampling x4 */
     if (write_register(REG_OSR,
                        BMP388_OSR_X2_TEMP_X4_PRESS) != BMP388_OK)
     {
@@ -246,17 +208,15 @@ int BMP388_Init(void)
         return BMP388_ERROR;
     }
 
-    /* Configure output data rate to 50 Hz. */
-    if (write_register(REG_ODR,
-                       BMP388_ODR_50_HZ) != BMP388_OK)
+    /* Configure output data rate */
+    if (write_register(REG_ODR, BMP388_ODR_50_HZ) != BMP388_OK)
     {
         calib.valid = 0U;
         return BMP388_ERROR;
     }
 
-    /* Enable pressure and temperature; select normal mode. */
-    if (write_register(REG_PWR_CTRL,
-                       BMP388_NORMAL_MODE) != BMP388_OK)
+    /* Enable pressure and temperature; normal mode */
+    if (write_register(REG_PWR_CTRL, BMP388_NORMAL_MODE) != BMP388_OK)
     {
         calib.valid = 0U;
         return BMP388_ERROR;
@@ -300,8 +260,7 @@ static float compensate_pressure(uint32_t raw_press)
     float out2 = (float)raw_press *
                  (calib.p1 + d1 + d2 + d3);
 
-    float raw_press_squared =
-        (float)raw_press * (float)raw_press;
+    float raw_press_squared = (float)raw_press * (float)raw_press;
 
     d1 = raw_press_squared;
     d2 = calib.p9 + calib.p10 * t;
@@ -324,20 +283,15 @@ int BMP388_ReadData(BMP388_Data *data)
     uint8_t raw[6];
     uint32_t timeout = BMP388_POLL_LIMIT;
 
-    if ((data == 0) || (calib.valid == 0U))
+    if ((data == 0U) || (calib.valid == 0U))
     {
         return BMP388_ERROR;
     }
 
-    /*
-     * Wait for both temperature and pressure data.
-     * The polling limit bounds the wait but is not a time value.
-     */
+    /* Wait for both temperature and pressure data */
     while (timeout > 0U)
     {
-        if (read_registers(REG_STATUS,
-                           &status,
-                           1U) != BMP388_OK)
+        if (read_registers(REG_STATUS, &status, 1U) != BMP388_OK)
         {
             return BMP388_ERROR;
         }
@@ -355,10 +309,8 @@ int BMP388_ReadData(BMP388_Data *data)
         return BMP388_ERROR;
     }
 
-    /* Burst-read pressure and temperature registers 0x04–0x09. */
-    if (read_registers(REG_DATA_START,
-                       raw,
-                       6U) != BMP388_OK)
+    /* Burst-read pressure and temperature registers 0x04–0x09 */
+    if (read_registers(REG_DATA_START, raw, 6U) != BMP388_OK)
     {
         return BMP388_ERROR;
     }
