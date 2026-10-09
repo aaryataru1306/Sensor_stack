@@ -1,10 +1,8 @@
 #include "spi.h"
-// #include "uart.h"
-/* 
-* NOTE: Every comment with this message "Send a UART debugging message ex: "
-* will be removed after the UART driver is finished.
-* Function calls (UART1_SendString) may differ.
-*/
+#include "uart.h"
+
+extern UART_Handle_t g_debug_uart; /* Declared and initialized in main.c */
+
 void SPI_CS_Init(uint8_t pinNumber) {
     /* 1. Enable GPIOA Clock */
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
@@ -30,7 +28,8 @@ void SPI_CS_Deselect(uint8_t pinNumber) {
 }
 
 void SPI1_Init(void) {
-    // Send a UART debugging message ex: UART1_SendString("[SPI1] Initializing SPI1 Master peripheral...\r\n");
+    UART_Transmit(&g_debug_uart, (const uint8_t *)"[SPI1] Initializing SPI1 Master peripheral...\r\n", 
+                  sizeof("[SPI1] Initializing SPI1 Master peripheral...\r\n") - 1U);
 
     /* 1. Enable GPIOA and SPI1 Clocks */
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
@@ -65,7 +64,8 @@ void SPI1_Init(void) {
     SPI1->CR1 |= SPI_CR1_MSTR | SPI_CR1_SSM | SPI_CR1_SSI | (3U << SPI_CR1_BR_Pos);
     SPI1->CR1 |= SPI_CR1_SPE;
 
-    // Send a UART debugging message ex: UART1_SendString("[SPI1] Init Complete (6.25 MHz, Master Mode 0, CS PA1 & PA4 Ready)\r\n");
+    UART_Transmit(&g_debug_uart, (const uint8_t *)"[SPI1] Init Complete (6.25 MHz, Master Mode 0, CS PA1 & PA4 Ready)\r\n", 
+                  sizeof("[SPI1] Init Complete (6.25 MHz, Master Mode 0, CS PA1 & PA4 Ready)\r\n") - 1U);
 }
 
 uint8_t SPI1_TransferByte(uint8_t data) {
@@ -73,7 +73,8 @@ uint8_t SPI1_TransferByte(uint8_t data) {
 
     while (!(SPI1->SR & SPI_SR_TXE) && --timeout);
     if (timeout == 0U) {
-        // Send a UART debugging message ex: UART1_SendString("[SPI1] ERROR: TXE Timeout!\r\n");
+        UART_Transmit(&g_debug_uart, (const uint8_t *)"[SPI1] ERROR: TXE Timeout!\r\n", 
+                      sizeof("[SPI1] ERROR: TXE Timeout!\r\n") - 1U);
         return 0xFF;
     }
 
@@ -82,7 +83,8 @@ uint8_t SPI1_TransferByte(uint8_t data) {
     timeout = 10000U;
     while (!(SPI1->SR & SPI_SR_RXNE) && --timeout);
     if (timeout == 0U) {
-        // Send a UART debugging message ex: UART1_SendString("[SPI1] ERROR: RXNE Timeout!\r\n");
+        UART_Transmit(&g_debug_uart, (const uint8_t *)"[SPI1] ERROR: RXNE Timeout!\r\n", 
+                      sizeof("[SPI1] ERROR: RXNE Timeout!\r\n") - 1U);
         return 0xFF;
     }
 
@@ -92,7 +94,8 @@ uint8_t SPI1_TransferByte(uint8_t data) {
     timeout = 10000U;
     while ((SPI1->SR & SPI_SR_BSY) && --timeout);
     if (timeout == 0U) {
-        // Send a UART debugging message ex: UART1_SendString("[SPI1] ERROR: BSY Timeout!\r\n");
+        UART_Transmit(&g_debug_uart, (const uint8_t *)"[SPI1] ERROR: BSY Timeout!\r\n", 
+                      sizeof("[SPI1] ERROR: BSY Timeout!\r\n") - 1U);
     }
 
     return rxData;
@@ -100,7 +103,8 @@ uint8_t SPI1_TransferByte(uint8_t data) {
 
 void SPI1_ReadRegisters(uint8_t cs_pin, uint8_t reg_addr, uint8_t *buffer, uint16_t length) {
     if (buffer == 0 && length > 0U) {
-        // Send a UART debugging message ex: UART1_SendString("[SPI1] ERROR: Null Buffer Passed!\r\n");
+        UART_Transmit(&g_debug_uart, (const uint8_t *)"[SPI1] ERROR: Null Buffer Passed!\r\n", 
+                      sizeof("[SPI1] ERROR: Null Buffer Passed!\r\n") - 1U);
         return;
     }
 

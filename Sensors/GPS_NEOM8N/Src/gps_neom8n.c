@@ -2,13 +2,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern UART_Handle_t g_debug_uart; /* Declared and initialized in main.c */
+
 void GPS_Init(GPS_Driver_t *driver, UART_Handle_t *huart) {
     if (driver == NULL || huart == NULL) {
+        UART_Transmit(&g_debug_uart, (const uint8_t *)"[GPS] ERROR: Null Driver/UART handle!\r\n", 
+                      sizeof("[GPS] ERROR: Null Driver/UART handle!\r\n") - 1U);
         return;
     }
     driver->huart = huart;
     driver->rx_idx = 0U;
     memset(driver->rx_buf, 0, sizeof(driver->rx_buf));
+
+    UART_Transmit(&g_debug_uart, (const uint8_t *)"[GPS] Driver Initialized (Bound to USART)\r\n", 
+                  sizeof("[GPS] Driver Initialized (Bound to USART)\r\n") - 1U);
 }
 
 /**
@@ -95,6 +102,10 @@ bool GPS_ParseNMEA(const char *sentence, GPS_Data_t *out_data) {
     }
 
     out_data->fix_valid = true;
+
+    UART_Transmit(&g_debug_uart, (const uint8_t *)"[GPS] Valid 3D Fix Acquired!\r\n", 
+                  sizeof("[GPS] Valid 3D Fix Acquired!\r\n") - 1U);
+                  
     return true;
 }
 
