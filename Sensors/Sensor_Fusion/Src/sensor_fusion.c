@@ -26,8 +26,6 @@
  */
 
 #include "sensor_fusion.h"
-#include "sensor_fusion_private.h"
-#include "sensor_fusion_config.h"
 #include <string.h>
 
 #ifndef M_PI
