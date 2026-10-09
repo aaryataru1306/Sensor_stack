@@ -305,4 +305,243 @@ SF_Status_t SF_GetAltitude(void *ctx, SF_Altitude_t *out);
 }
 #endif
 
+
+/* ============================================================================ *
+ *                       INTEGRATED SENSOR FUSION CONFIG                        *
+ * ============================================================================ */
+
+/**
+ ******************************************************************************
+ * @file    sensor_fusion_config.h
+ * @brief   Compile-time tuning for the sensor-fusion EKF.
+ * @details
+ *   Every constant here is a design decision that will need revisiting
+ *   against real data. The values below are reasonable starting points
+ *   for a ground vehicle on a Black Pill, but the only way to know they
+ *   are right is to log the filter's outputs against a known-good
+ *   reference (a turntable for attitude, a surveyed position for GPS).
+ *
+ *   Units follow the EKF convention: gyro and accel noise are given as
+ *   *variances* (σ²), not standard deviations, because that's what the
+ *   covariance update math actually consumes.
+ ******************************************************************************
+ */
+
+
+/*----------------------------------------------------------------------------*
+ *                              SAMPLE RATES                                  *
+ *----------------------------------------------------------------------------*/
+
+/** @brief Expected IMU sample interval [s]. The filter assumes this is
+ *         roughly constant — if you call SF_Update() faster or slower
+ *         than this, adjust the Q values accordingly, or better, feed
+ *         the filter the actual measured dt. */
+#define SF_IMU_DT              0.01f      /* 100 Hz */
+
+/** @brief Gyro measurement noise σ² [rad²/s²]. From the ICM20948
+ *         datasheet's noise density (~0.015 dps/√Hz) at 100 Hz
+ *         bandwidth, this lands around 1e-5 for a quiet bench. */
+#define SF_GYRO_NOISE_VAR      1.0e-5f
+
+/** @brief Gyro bias random-walk σ² [rad²/s³]. How fast the bias is
+ *         allowed to wander. Too small → the filter takes forever to
+ *         learn the bias. Too large → the filter interprets real motion
+ *         as bias. Start here, tighten once you see the estimated bias
+ *         settle. */
+#define SF_GYRO_BIAS_WALK_VAR  1.0e-9f
+
+/** @brief Accelerometer measurement noise σ² [g²]. Includes both sensor
+ *         noise and the fact that during motion the accel *isn't* just
+ *         gravity — the filter treats all of that as noise. 1e-2 is
+ *         deliberately loose so a bump doesn't yank the attitude. */
+#define SF_ACCEL_NOISE_VAR     1.0e-2f
+
+/*----------------------------------------------------------------------------*
+ *                          INITIAL UNCERTAINTY                               *
+ *----------------------------------------------------------------------------*/
+
+/** @brief Initial attitude uncertainty σ² [quaternion component²]. */
+#define SF_INIT_P_ATTITUDE     1.0e-2f
+
+/** @brief Initial gyro-bias uncertainty σ² [(rad/s)²]. */
+#define SF_INIT_P_GYRO_BIAS    1.0e-4f
+
+/*----------------------------------------------------------------------------*
+ *                          OUTLIER REJECTION                                 *
+ *----------------------------------------------------------------------------*/
+
+/** @brief Accelerometer magnitude window [g]. If |a| is outside
+ *         [1-margin, 1+margin] the accel reading is rejected for this
+ *         update — the vehicle is accelerating hard enough that the
+ *         "gravity is 1 g" assumption doesn't hold, and using it would
+ *         corrupt attitude. */
+#define SF_ACCEL_MAG_MIN       0.75f
+#define SF_ACCEL_MAG_MAX       1.25f
+
+/** @brief Mahalanobis distance gate for the accel update. If the
+ *         normalized innovation squared exceeds this, the measurement is
+ *         treated as an outlier and skipped. χ²(2 dof, 99.9%) ≈ 13.8. */
+#define SF_ACCEL_MAHALANOBIS_GATE  13.8f
+
+/*----------------------------------------------------------------------------*
+ *                              SANITY CLAMPS                                 *
+ *----------------------------------------------------------------------------*/
+
+/** @brief Gyro bias magnitude clamp [rad/s]. Prevents the filter from
+ *         winding up to a nonsense bias if it gets a run of corrupted
+ *         measurements. ±0.1 rad/s ≈ ±5.7°/s, well above any real bias. */
+#define SF_GYRO_BIAS_MAX       0.1f
+
+/** @brief Maximum time [s] between updates before the filter assumes it
+ *         lost data and resets the covariance (but keeps the state). */
+#define SF_MAX_DT_S            0.5f
+
+
+/* ============================================================================ *
+ *                       INTEGRATED SENSOR FUSION PRIVATE                       *
+ * ============================================================================ */
+
+/**
+ ******************************************************************************
+ * @file    sensor_fusion_private.h
+ * @brief   Internal EKF state, quaternion math helpers, and matrix ops —
+ *          sensor-fusion-layer internal.
+ * @details
+ *   Nothing in this file is part of the public API. Only sensor_fusion.c
+ *   should include it.
+ ******************************************************************************
+ */
+
+
+#include <stdint.h>
+#include <math.h>
+
+/*============================================================================*
+ *                          STATE VECTOR LAYOUT                               *
+ *============================================================================*/
+
+/** @brief Number of states in the EKF: 4 quaternion + 3 gyro bias. */
+#define SF_N_STATES     7U
+
+/** @brief Index of the first quaternion component (qw). */
+#define SF_IDX_QW       0U
+#define SF_IDX_QX       1U
+#define SF_IDX_QY       2U
+#define SF_IDX_QZ       3U
+
+/** @brief Index of the first gyro-bias component (bgx). */
+#define SF_IDX_BGX      4U
+#define SF_IDX_BGY      5U
+#define SF_IDX_BGZ      6U
+
+/*============================================================================*
+ *                          FIXED-SIZE MATRIX OPS                             *
+ *============================================================================*
+ *
+ * There is no BLAS on a bare-metal Cortex-M4 that we want to link, and
+ * the matrices here are small and fixed-size. Everything below operates
+ * on stack-allocated arrays of known dimensions, so the compiler can
+ * unroll and register-allocate them. This is what makes the EKF run in
+ * well under 1 ms on a 100 MHz M4 with FPU.
+ */
+
+/** @brief Fixed 7×7 matrix, row-major. */
+typedef struct { float m[SF_N_STATES][SF_N_STATES]; } sf_mat7_t;
+
+/** @brief Fixed 7-vector. */
+typedef struct { float v[SF_N_STATES]; } sf_vec7_t;
+
+/*============================================================================*
+ *                          QUATERNION HELPERS                                *
+ *============================================================================*/
+
+/**
+ * @brief Normalize a quaternion in place.
+ * @param[in,out] q  Quaternion as [w, x, y, z].
+ */
+void sf_quat_normalize(float q[4]);
+
+/**
+ * @brief Convert a quaternion to a 3×3 rotation matrix (body → world).
+ * @param[in]  q     Quaternion as [w, x, y, z].
+ * @param[out] R_out Row-major 3×3 matrix, R_out[9].
+ */
+void sf_quat_to_rotmat(const float q[4], float R_out[9]);
+
+/**
+ * @brief Convert a small rotation vector to a quaternion increment.
+ * @details Uses the small-angle approximation: for |θ| < ~10°, the
+ *          quaternion is (1, θ/2) normalized. This is the standard
+ *          first-order update and is what keeps the EKF's attitude
+ *          propagation cheap.
+ *
+ * @param[in]  dtheta  Rotation vector [rad] as [x, y, z].
+ * @param[out] dq      Quaternion increment [w, x, y, z].
+ */
+void sf_quat_from_small_rot(const float dtheta[3], float dq[4]);
+
+/**
+ * @brief Hamilton product: q_out = q_a ⊗ q_b.
+ */
+void sf_quat_multiply(const float q_a[4], const float q_b[4], float q_out[4]);
+
+/*============================================================================*
+ *                          MATRIX OPS (7×7 and mixed)                        *
+ *============================================================================*/
+
+void sf_mat7_identity(sf_mat7_t *A);
+void sf_mat7_zero(sf_mat7_t *A);
+void sf_mat7_copy(const sf_mat7_t *src, sf_mat7_t *dst);
+void sf_mat7_add(const sf_mat7_t *A, const sf_mat7_t *B, sf_mat7_t *C);
+void sf_mat7_sub(const sf_mat7_t *A, const sf_mat7_t *B, sf_mat7_t *C);
+void sf_mat7_mul(const sf_mat7_t *A, const sf_mat7_t *B, sf_mat7_t *C);
+void sf_mat7_transpose(const sf_mat7_t *A, sf_mat7_t *At);
+void sf_mat7_scale(sf_mat7_t *A, float s);
+
+/** @brief Symmetrize P in place: P = (P + Pᵀ)/2. Called after every
+ *         update to stop numerical asymmetry from accumulating. */
+void sf_mat7_symmetrize(sf_mat7_t *P);
+
+/** @brief In-place Cholesky-based inverse of a symmetric positive-
+ *         definite 7×7 matrix. Returns 0 on success, -1 if P is not
+ *         positive definite (which should never happen with correct Q/R,
+ *         but the return code lets the caller skip the update instead of
+ *         propagating NaNs).
+ */
+int sf_mat7_inverse_spd(const sf_mat7_t *A, sf_mat7_t *Ainv);
+
+/*============================================================================*
+ *                          FUSION INTERNAL STATE                             *
+ *============================================================================*/
+
+/**
+ * @brief Full internal state of one EKF instance.
+ *
+ * @details
+ *   Opaque to callers — the public handle wraps a pointer to this. Kept
+ *   separate from the public header so the 7×7 covariance matrix doesn't
+ *   appear in every translation unit that includes sensor_fusion.h.
+ */
+typedef struct {
+    /* --- State --- */
+    float q[4];                        /**< Attitude quaternion. */
+    float bg[3];                       /**< Gyro bias [rad/s]. */
+
+    /* --- Covariance --- */
+    sf_mat7_t P;
+
+    /* --- Process noise --- */
+    sf_mat7_t Q;
+
+    /* --- Last update time --- */
+    float last_dt_s;
+
+    /* --- Diagnostics --- */
+    uint32_t updates_gyro;
+    uint32_t updates_accel;
+    uint32_t rejections_magnitude;
+    uint32_t rejections_mahalanobis;
+    int      last_init_ok;
+} sf_internal_t;
+
 #endif /* SENSOR_FUSION_H */
