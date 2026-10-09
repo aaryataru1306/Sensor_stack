@@ -2,6 +2,12 @@
 #define BMP388_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include "i2c.h"
+
+/* BMP388 I2C addresses (SDO connected to GND or VDDIO) */
+#define BMP388_I2C_ADDR_PRIM    0x76U
+#define BMP388_I2C_ADDR_SEC     0x77U
 
 /* BMP388 register addresses */
 #define BMP388_REG_CHIP_ID      0x00U
@@ -22,15 +28,16 @@
 #define BMP388_ERROR            (-1)
 #define BMP388_INVALID_ID       (-2)
 
-/* Sensor data */
+/* Sensor data structure */
 typedef struct
 {
     float temperature_c;
     float pressure_pa;
+    float altitude_m;
 } BMP388_Data;
 
 /* Public driver functions */
-int BMP388_Init(void);
+int BMP388_Init(i2c_t *i2c_dev, uint8_t i2c_addr);
 int BMP388_ReadChipID(uint8_t *chip_id);
 int BMP388_ReadData(BMP388_Data *data);
 

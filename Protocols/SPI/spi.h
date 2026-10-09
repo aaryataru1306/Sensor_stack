@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "stm32f411xe.h"
 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -15,6 +16,8 @@ extern "C" {
 
 #define SPI1_CS_ICM20948_PIN  1U   /* PA1 - ICM20948 CS */
 #define SPI1_CS_BMP388_PIN    4U   /* PA4 - BMP388 CS */
+#define SPI1_CS_Enable(pin)  SPI_CS_Select(pin)
+#define SPI1_CS_Disable(pin) SPI_CS_Deselect(pin)
 
 /* --- Initialization & CS Helpers --- */
 void SPI1_Init(void);

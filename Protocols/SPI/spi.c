@@ -61,7 +61,7 @@ void SPI1_Init(void) {
 
     /* 4. Configure SPI1 CR1: Master, Software NSS (SSI/SSM), Prescaler DIV16, SPE=1 */
     SPI1->CR1 = 0;
-    SPI1->CR1 |= SPI_CR1_MSTR | SPI_CR1_SSM | SPI_CR1_SSI | (3U << SPI_CR1_BR_Pos);
+    SPI1->CR1 |= SPI_CR1_MSTR | SPI_CR1_SSM | SPI_CR1_SSI | (5U << SPI_CR1_BR_Pos);
     SPI1->CR1 |= SPI_CR1_SPE;
 
     UART_Transmit(&g_debug_uart, (const uint8_t *)"[SPI1] Init Complete (6.25 MHz, Master Mode 0, CS PA1 & PA4 Ready)\r\n", 
