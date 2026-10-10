@@ -32,8 +32,11 @@
 
 #include "icm20948.h"
 #include "icm20948_private.h"
-#include "icm20948_config.h"
 #include "spi_driver.h"
+
+#ifndef ICM20948_CS_PIN
+#define ICM20948_CS_PIN SPI1_CS_ICM20948_PIN
+#endif
 
 /*============================================================================*
  *                          INTERNAL BUS WRAPPERS                             *

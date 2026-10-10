@@ -48,6 +48,7 @@
 #include "uart_bare.h"
 
 /* Sensor drivers */
+#include "icm42688.h"
 #include "icm20948.h"
 #include "bmp388.h"
 #include "MPU6050_interface.h"
@@ -169,6 +170,8 @@ void SystemClock_Config(void)
  */
 
 /* --- Raw sensor readings --- */
+static ICM42688_Data_t  g_icm42688_data;
+static bool             g_has_icm42688 = false;
 static ICM20948_Data_t   g_icm_data;
 static BMP388_CalibData  g_bmp_calib;
 static BMP388_Data       g_bmp_data;
@@ -211,12 +214,14 @@ int main(void)
     /* ---- 1. Clock. ---- */
     SystemClock_Config();
 
-    /* ---- 2. SPI1 (shared by ICM20948 and BMP388). ---- */
+    /* ---- 2. SPI1 (shared by ICM IMU and BMP388). ---- */
     SPI1_Init();
 
-    /* ---- 3. ICM20948 on SPI1. ---- */
-    if (ICM20948_Init(ICM20948_ACCEL_FS_2G,
-                      ICM20948_GYRO_FS_250DPS) != ICM20948_OK) {
+    /* ---- 3. Primary IMU on SPI1 (ICM-42688-P preferred, fallback to ICM-20948). ---- */
+    if (ICM42688_InitDefault() == ICM42688_OK) {
+        g_has_icm42688 = true;
+    } else if (ICM20948_Init(ICM20948_ACCEL_FS_2G,
+                             ICM20948_GYRO_FS_250DPS) != ICM20948_OK) {
         Error_Handler();
     }
 
@@ -233,7 +238,7 @@ int main(void)
     /* ---- 6. GPS on USART2 (PA2 = TX, PA3 = RX). ----
      *
      * Bare-metal USART2 peripheral and GPIO setup at 9600 baud (NEO-M8N default).
-     * ICM20948 CS is on PA1, freeing PA3 for USART2_RX. */
+     * IMU CS is on PA1, freeing PA3 for USART2_RX. */
     gps_bus_stm32_setup(PCLK1_HZ, 9600U);
 
     g_gps.bus_context = 0;
@@ -247,40 +252,61 @@ int main(void)
 
     /* ---- 7. Prime the fusion EKF ----
      *
-     * Take one ICM accel reading, so the initial attitude is correct
+     * Take one IMU accel reading, so the initial attitude is correct
      * regardless of how the board is mounted. If this fails (board
      * vibrating at power-on, or the reading out of range), fall back
      * to identity — the filter will still converge over the first
      * few seconds as accel updates come in. */
-    ICM20948_ReadAll(&g_icm_data);
-    if (SF_InitFromAccel(g_icm_data.accel_x,
-                         g_icm_data.accel_y,
-                         g_icm_data.accel_z) != SF_OK) {
-        (void)SF_Reset(0);
+    if (g_has_icm42688) {
+        ICM42688_ReadAll(&g_icm42688_data);
+        if (SF_InitFromAccel(g_icm42688_data.accel_x,
+                             g_icm42688_data.accel_y,
+                             g_icm42688_data.accel_z) != SF_OK) {
+            (void)SF_Reset(0);
+        }
+    } else {
+        ICM20948_ReadAll(&g_icm_data);
+        if (SF_InitFromAccel(g_icm_data.accel_x,
+                             g_icm_data.accel_y,
+                             g_icm_data.accel_z) != SF_OK) {
+            (void)SF_Reset(0);
+        }
     }
 
     /* ---- 8. Main loop. ---- */
     for (;;) {
         /* === A. Read every sensor === */
+        float gx_rad, gy_rad, gz_rad;
+        float ax, ay, az;
 
-        ICM20948_ReadAll(&g_icm_data);
+        if (g_has_icm42688) {
+            ICM42688_ReadAll(&g_icm42688_data);
+            gx_rad = g_icm42688_data.gyro_rad_x;
+            gy_rad = g_icm42688_data.gyro_rad_y;
+            gz_rad = g_icm42688_data.gyro_rad_z;
+            ax     = g_icm42688_data.accel_x;
+            ay     = g_icm42688_data.accel_y;
+            az     = g_icm42688_data.accel_z;
+        } else {
+            ICM20948_ReadAll(&g_icm_data);
+            gx_rad = g_icm_data.gyro_x * DEG_TO_RAD;
+            gy_rad = g_icm_data.gyro_y * DEG_TO_RAD;
+            gz_rad = g_icm_data.gyro_z * DEG_TO_RAD;
+            ax     = g_icm_data.accel_x;
+            ay     = g_icm_data.accel_y;
+            az     = g_icm_data.accel_z;
+        }
+
         (void)MPU6050_enumReadData(&g_mpu_data);
         BMP388_GetData(&g_bmp_calib, &g_bmp_data);
         (void)GPS_ReadData(&g_gps, &g_gps_fix);
 
         /* === B. Attitude EKF ===
          *
-         * Gyro in rad/s (the driver returns deg/s), accel in g
-         * (the driver already returns g). */
-        float gx_rad = g_icm_data.gyro_x * DEG_TO_RAD;
-        float gy_rad = g_icm_data.gyro_y * DEG_TO_RAD;
-        float gz_rad = g_icm_data.gyro_z * DEG_TO_RAD;
-
+         * Gyro in rad/s, accel in g. */
         (void)SF_Update(0,
                         gx_rad, gy_rad, gz_rad,
-                        g_icm_data.accel_x,
-                        g_icm_data.accel_y,
-                        g_icm_data.accel_z,
+                        ax, ay, az,
                         LOOP_DT_S);
 
         (void)SF_GetAttitude(0, &g_attitude);

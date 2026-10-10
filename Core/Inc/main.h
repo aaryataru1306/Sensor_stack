@@ -56,6 +56,7 @@ extern "C" {
 #define PIN_SPI1_MISO       6U    /**< PA6 — SPI1_MISO, AF5. */
 #define PIN_SPI1_MOSI       7U    /**< PA7 — SPI1_MOSI, AF5. */
 
+#define PIN_ICM42688_CS     1U    /**< PA1 — ICM42688-P chip-select, active low. */
 #define PIN_ICM20948_CS     1U    /**< PA1 — ICM20948 chip-select, active low (PA3 freed for USART2_RX). */
 #define PIN_BMP388_CS       4U    /**< PA4 — BMP388 chip-select, active low. */
 /** @} */
