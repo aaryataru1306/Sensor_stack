@@ -71,6 +71,7 @@ extern "C" {
 #define SPI1_CS_ICM42688_PIN   1U   /**< PA1 — ICM42688-P chip-select, active low. */
 #define SPI1_CS_ICM20948_PIN   1U   /**< PA1 — ICM20948 chip-select, active low. */
 #define SPI1_CS_BMP388_PIN     4U   /**< PA4 — BMP388 chip-select, active low. */
+#define SPI1_CS_LSM303D_PIN    0U   /**< PA0 — LSM303D chip-select (SPI mode default), active low. */
 /** @} */
 
 /*============================================================================*

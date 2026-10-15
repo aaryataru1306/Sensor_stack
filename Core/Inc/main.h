@@ -59,6 +59,7 @@ extern "C" {
 #define PIN_ICM42688_CS     1U    /**< PA1 — ICM42688-P chip-select, active low. */
 #define PIN_ICM20948_CS     1U    /**< PA1 — ICM20948 chip-select, active low (PA3 freed for USART2_RX). */
 #define PIN_BMP388_CS       4U    /**< PA4 — BMP388 chip-select, active low. */
+#define PIN_LSM303D_CS      0U    /**< PA0 — LSM303D chip-select (SPI mode default), active low. */
 /** @} */
 
 /*============================================================================*
@@ -77,6 +78,8 @@ extern "C" {
  */
 #define PIN_I2C1_SCL        6U    /**< PB6 — I2C1_SCL, AF4, open-drain. */
 #define PIN_I2C1_SDA        7U    /**< PB7 — I2C1_SDA, AF4, open-drain. */
+#define LSM303D_I2C_ADDR_SA0_LOW   0x1EU  /**< LSM303D 7-bit I2C address when SA0 is grounded. */
+#define LSM303D_I2C_ADDR_SA0_HIGH  0x1DU  /**< LSM303D 7-bit I2C address when SA0 is pulled to VDD. */
 /** @} */
 
 /*============================================================================*
